@@ -79,6 +79,14 @@ class SimpleNode(object):
         self.start_ace()
 
 
+    def add_cluster_head(self, ch_ip, ch_id):
+        pass
+
+
+    def del_cluster_head(self, ch_ip):
+        pass
+
+
     def get_mystate(self):
         return self.my_state
 
@@ -118,12 +126,11 @@ class SimpleNode(object):
                 print "+--------------------------------+"
                 print "|      Node elected as CH        |"
                 print "+--------------------------------+"
-                exit()
             elif self.my_state == ACE_STATE_CLUSTERED:
-                # wait for my cluster-heads to terminate
                 # pick one as my cluster-head
-                logging.info("pick one as my cluster-head")
-                exit()
+                print "+--------------------------------+"
+                print "|   Pick one as my cluster-head  |"
+                print "+--------------------------------+"
             elif self.my_state == ACE_STATE_UNCLUSTERED:
                 # pick a random clustered node to as proxy
                 # after it terminates wait for it to terminate
@@ -131,7 +138,6 @@ class SimpleNode(object):
                 print "|    Node will declare himself   |"
                 print "|             as CH              |"
                 print "+--------------------------------+"
-                exit()
         elif self.my_state == ACE_STATE_UNCLUSTERED and \
                 self.num_loyal_followers >= self.fmin(my_time, CI):
             self.my_cluster_id = self.generate_new_random_id()
@@ -151,12 +157,14 @@ class SimpleNode(object):
                     best_follower_count = follower_count
                     best_leader_address = neighbor_address
             if best_leader != self.my_cluster_id:
+                ## update my status to clustered
+                ## add the new cluster leader to the list
                 self.send_promote_message(best_leader_address, ACE_MSG_PROMOTE, self.my_cluster_id)
                 ## wait for the bestLeader to broadcast RECRUIT message
-                logging.debug("Waiting for node %s to send its RECRUIT message...",
-                              best_leader_address)
                 while self.migrating:
-                    time.sleep(0.1)
+                    logging.debug("Waiting for node %s to send its RECRUIT message...",
+                                  best_leader_address)
+                    time.sleep(0.250)
                 self.locally_broadcast(ACE_MSG_ABDICATE, self.my_ip, self.my_cluster_id)
         self.print_node_info()
 
@@ -237,12 +245,12 @@ class SimpleNode(object):
                 response_arr = response_str.split(';')
                 send_socket.close()
             except socket.timeout:
-                logging.debug("send_message: Socket timeout error. Attemp %s", attemp)
+                logging.error("send_message: Socket timeout error. Attemp %s", attemp)
                 time.sleep(0.5)
                 continue
             except socket.error, exc:
-                logging.debug("send_message: error sending message to node %s. Exception: %s",
-                              dst_address, exc)
+                logging.critical("send_message: error sending message to node %s. Exception: %s",
+                                 dst_address, exc)
                 raise
             else:
                 break
@@ -259,11 +267,11 @@ class SimpleNode(object):
                 send_socket.send(message_str)
                 send_socket.close()
             except socket.timeout:
-                logging.debug("send_message: Socket timeout error. Attemp %s", attemp)
+                logging.error("send_message: Socket timeout error. Attemp %s", attemp)
                 time.sleep(0.5)
             except socket.error, exc:
-                logging.debug("send_message_noans: error sending message to node %s. Exception: %s",
-                              dst_address, exc)
+                logging.critical("send_message_noans: error sending message to node %s. Exception: %s",
+                                 dst_address, exc)
                 raise
             else:
                 break
@@ -281,7 +289,7 @@ class SimpleNode(object):
             logging.debug("CONNHANDLER: Connection accepted from : %s", client_address)
             request = client_sock.recv(TCP_BUFFER_SIZE)
             ace_msg = int(request.split(';')[0])
-            logging.debug("CONNHANDLER: Receiving message: %s from host %s", 
+            logging.debug("CONNHANDLER: Receiving message: %s from host %s",
                           ace_msg, client_address[0])
             if ace_msg == ACE_MSG_GETSTATUS:
                 logging.debug("CONNHANDLER: Receiving a GETSTATUS message.")
@@ -304,13 +312,18 @@ class SimpleNode(object):
                               client_address[0])
                 client_sock.send(response_str)
             if ace_msg == ACE_MSG_RECRUIT:
-                logging.debug("CONNHANDLER: Handling connections: Receiving a RECRUIT message.")
-                self.my_state = ACE_STATE_CLUSTERED
-                new_ch = request.split(';')[1]
-                self.cluster_to_follow = new_ch
-                self.cluster_head_list.append(new_ch)
-                logging.info("CONNHANDLER: OK! I am a follower of the CH %s",
-                             self.cluster_to_follow)
+                logging.debug("CONNHANDLER: Receiving a RECRUIT message.")
+                if self.my_state == ACE_STATE_CLUSTER_HEAD:
+                    logging.info("CONNHANDLER: I am a CH. I will not follow %s",
+                                self.cluster_to_follow)
+                else:
+                    self.my_state = ACE_STATE_CLUSTERED
+                    new_ch_ip = request.split(';')[1]
+                    new_ch_id = request.split(';')[2]
+                    self.cluster_to_follow = new_ch_ip
+                    self.cluster_head_list.append(new_ch_ip)
+                    logging.info("CONNHANDLER: OK! I am a follower of the CH %s",
+                                self.cluster_to_follow)
             if ace_msg == ACE_MSG_POLL:
                 logging.debug("CONNHANDLER: Receiving a POLL message.")
                 ch_to_poll = request.split(';')[1]
@@ -319,6 +332,7 @@ class SimpleNode(object):
                 r_num_loyal_followers = str(num_loyal_followers)
                 response_str = ';'.join([r_my_cluster_id, r_num_loyal_followers])
                 client_sock.send(response_str)
+                logging.debug("CONNHANDLER: POLL Done! The answer was sent.")
             if ace_msg == ACE_MSG_PROMOTE:
                 cluster_id = request.split(';')[1]
                 logging.debug("CONNHANDLER: Receiving a PROMOTE message.")
@@ -327,6 +341,8 @@ class SimpleNode(object):
             if ace_msg == ACE_MSG_PROMOTE_DONE:
                 logging.debug("CONNHANDLER: Receiving a PROMOTE_DONE message.")
                 self.migrating = False
+            if ace_msg == ACE_MSG_ABDICATE:
+                logging.debug("CONNHANDLER: Receiving a ABDICATE message.")
             client_sock.close()
 
 
@@ -374,7 +390,7 @@ def main(host_ip):
     ## Setting up the log system
     # log_format = "%(asctime)s: %(funcName)20s() - %(lineno)s: %(message)s"
     log_format = "%(asctime)s,%(msecs)03d:L%(lineno)4s: %(message)s"
-    log_level = logging.INFO
+    log_level = logging.DEBUG
     logging.basicConfig(level=log_level, 
                         format=log_format,
                         datefmt='%H:%M:%S',)
