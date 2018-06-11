@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import inspect
 import logging
 import math
 import random
@@ -46,7 +45,7 @@ ACE_EXPECTED_DURATION_LENGHT = 7        # milisseconds
 ACE_K1 = 2.3                            # Values from the authors of the ACE
 ACE_K2 = 0.1                            # Values from the authors of the ACE
 # Estimated node degree
-ACE_D = sum ([ len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP ]) / len(NEIGHBORS_MAP)
+ACE_D = sum([ len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP ]) / len(NEIGHBORS_MAP)
 CI = 30                                 # Estimated duration of the ACE
 
 ## Socket Parameters
@@ -67,7 +66,7 @@ class SimpleNode(object):
         self.my_ip = node_address
         self.my_state = ACE_STATE_UNCLUSTERED
         self.start_time = time.time()
-        self.cluster_head_list = []
+        self.cluster_head_list = dict()
         ## adittional flag to control PROMOTE process
         self.migrating = False
         ## Initializing the listener
@@ -79,12 +78,39 @@ class SimpleNode(object):
         self.start_ace()
 
 
-    def add_cluster_head(self, ch_ip, ch_id):
-        pass
+    def add_cluster_head(self, ch_address, ch_id):
+        if ch_address not in self.cluster_head_list:
+            self.cluster_head_list[ch_address] = ch_id
+            logging.debug("CH added. IP: %s, ID: %s.", ch_address, ch_id)
+        else:
+            logging.debug('Failed to add CH. %s is already in the cluster head list.', ch_address)
 
 
-    def del_cluster_head(self, ch_ip):
-        pass
+    def del_cluster_head(self, ch_address):
+        if ch_address in self.cluster_head_list:
+            del self.cluster_head_list[ch_address]
+            logging.debug("CH deleted. IP: %s.", ch_address)
+        else:
+            logging.debug('Failed to delete CH. %s is not in cluster head list.', ch_address)
+
+
+    def find_cluster_head_by_id(self, search_id):
+        address_found = ''
+        for ch_address, ch_id in self.cluster_head_list.iteritems():
+            if search_id == ch_id:
+                address_found = ch_address
+        return address_found
+
+
+    def update_cluster_head_by_id(self, ch_id, new_address):
+        old_address = self.find_cluster_head_by_id(ch_id)
+        if old_address != '':
+            del self.cluster_head_list[old_address]
+            self.cluster_head_list[new_address] = ch_id
+            logging.debug("CH Updated. IP: %s, ID: %s --> IP: %s, ID: %s.",
+                          old_address, ch_id, new_address, ch_id)
+        else:
+            logging.debug('Failed to update CH. ID %s is not in cluster head list.', ch_id)
 
 
     def get_mystate(self):
@@ -302,7 +328,7 @@ class SimpleNode(object):
                     # If the node is following only a single ch, it should include the ch-id
                     # in the response
                     if (len(self.cluster_head_list)) == 1:
-                        r_id_of_ch = str(self.cluster_head_list[0])
+                        r_id_of_ch = str(self.cluster_head_list.iteritems().next()[0])
                 if self.my_state == ACE_STATE_CLUSTER_HEAD:
                     r_state = str(self.my_state)
                     # r_number_of_chs = '0'
@@ -313,17 +339,17 @@ class SimpleNode(object):
                 client_sock.send(response_str)
             if ace_msg == ACE_MSG_RECRUIT:
                 logging.debug("CONNHANDLER: Receiving a RECRUIT message.")
+                new_ch_ip = request.split(';')[1]
+                new_ch_id = request.split(';')[2]
                 if self.my_state == ACE_STATE_CLUSTER_HEAD:
-                    logging.info("CONNHANDLER: I am a CH. I will not follow %s",
-                                self.cluster_to_follow)
+                    logging.info("CONNHANDLER: I am a CH. I will not follow %s.",
+                                 new_ch_ip)
                 else:
                     self.my_state = ACE_STATE_CLUSTERED
-                    new_ch_ip = request.split(';')[1]
-                    new_ch_id = request.split(';')[2]
-                    self.cluster_to_follow = new_ch_ip
-                    self.cluster_head_list.append(new_ch_ip)
+                    # self.cluster_to_follow = new_ch_ip
+                    self.add_cluster_head(new_ch_ip, new_ch_id)
                     logging.info("CONNHANDLER: OK! I am a follower of the CH %s",
-                                self.cluster_to_follow)
+                                 new_ch_ip)
             if ace_msg == ACE_MSG_POLL:
                 logging.debug("CONNHANDLER: Receiving a POLL message.")
                 ch_to_poll = request.split(';')[1]
@@ -341,8 +367,12 @@ class SimpleNode(object):
             if ace_msg == ACE_MSG_PROMOTE_DONE:
                 logging.debug("CONNHANDLER: Receiving a PROMOTE_DONE message.")
                 self.migrating = False
+                # self.locally_broadcast(ACE_MSG_ABDICATE, self.my_ip, self.my_cluster_id)
             if ace_msg == ACE_MSG_ABDICATE:
                 logging.debug("CONNHANDLER: Receiving a ABDICATE message.")
+                ch_ip_unfollow = request.split(';')[1]
+                # ch_id_unfollow = request.split(';')[2]
+                self.del_cluster_head(ch_ip_unfollow)
             client_sock.close()
 
 
@@ -362,13 +392,13 @@ class SimpleNode(object):
         self.print_chs()
         self.print_loyal_followers()
 
-    
+
     def print_chs(self):
         print "+--------------------------------+"
         print "|       Cluster Heads table      |"
         print "+--------------------------------+"
-        for ch_id in self.cluster_head_list:
-            print "| %-30s |" % ch_id
+        for ch_addr, ch_id in self.cluster_head_list.iteritems():
+            print "| %-15s -> %11s |" % (ch_addr, ch_id)
         print "+--------------------------------+"
         print ""
 
@@ -390,8 +420,8 @@ def main(host_ip):
     ## Setting up the log system
     # log_format = "%(asctime)s: %(funcName)20s() - %(lineno)s: %(message)s"
     log_format = "%(asctime)s,%(msecs)03d:L%(lineno)4s: %(message)s"
-    log_level = logging.DEBUG
-    logging.basicConfig(level=log_level, 
+    log_level = logging.INFO
+    logging.basicConfig(level=log_level,
                         format=log_format,
                         datefmt='%H:%M:%S',)
     simple_node = SimpleNode(host_ip)
