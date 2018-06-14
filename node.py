@@ -40,8 +40,8 @@ ACE_STATE_CLUSTER_HEAD = 2
 ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED', 'ACE_STATE_CLUSTERED', 'ACE_STATE_CLUSTER_HEAD']
 
 ## ACE Parameters
-ACE_MAX_WAIT_TIME = 3000     # milisseconds
-ACE_EXPECTED_DURATION_LENGHT = 7        # milisseconds
+ACE_MAX_WAIT_TIME = 3000                # milisseconds
+ACE_EXPECTED_DURATION_LENGHT = 4        # seconds
 ACE_K1 = 2.3                            # Values from the authors of the ACE
 ACE_K2 = 0.1                            # Values from the authors of the ACE
 # Estimated node degree
@@ -149,7 +149,6 @@ class SimpleNode(object):
     def scale_one_iteraction(self):
         self.num_loyal_followers = self.count_loyal_followers()
         my_time = time.time() - self.start_time
-        self.print_node_info(self.fmin(my_time, CI))
         if my_time > (3 * ACE_EXPECTED_DURATION_LENGHT):
             if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
                 print "+--------------------------------+"
@@ -167,6 +166,8 @@ class SimpleNode(object):
                 print "|    Node will declare himself   |"
                 print "|             as CH              |"
                 print "+--------------------------------+"
+            # Print the node info for debug purpose
+            self.print_node_info()
         elif self.get_mystate() == ACE_STATE_UNCLUSTERED and \
                 self.num_loyal_followers >= self.fmin(my_time, CI):
             self.my_cluster_id = self.generate_new_random_id()
@@ -199,7 +200,6 @@ class SimpleNode(object):
                                   best_leader_address)
                     # time.sleep(0.250)
                 self.locally_broadcast(ACE_MSG_ABDICATE, self.my_ip, old_cluster_id)
-        self.print_node_info()
 
 
     def send_promote_done(self, target_address):
@@ -426,7 +426,7 @@ def main(host_ip):
     ## Setting up the log system
     # log_format = "%(asctime)s: %(funcName)20s() - %(lineno)s: %(message)s"
     log_format = "%(asctime)s,%(msecs)03d:L%(lineno)4s: %(message)s"
-    log_level = logging.DEBUG
+    log_level = logging.INFO
     logging.basicConfig(level=log_level,
                         format=log_format,
                         datefmt='%H:%M:%S',)
