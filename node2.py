@@ -49,18 +49,19 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
                  'ACE_STATE_CLUSTER_HEAD']
 
 ## ACE Parameters
-ACE_MAX_WAIT_TIME = 3000                # milisseconds
-ACE_EXPECTED_ROUNDS = 10                # number of rounds to run
-ACE_EXPECTED_DURATION_LENGHT = 4        # seconds
-ACE_K1 = 2.3                            # Values from the authors of the ACE
-ACE_K2 = 0.1                            # Values from the authors of the ACE
+ACE_MAX_WAIT_TIME = 3000                                    # milisseconds
+ACE_EXPECTED_ROUNDS = 10                                    # number of rounds to run
+ACE_EXPECTED_DURATION_LENGHT = 4                            # seconds
+ACE_K1 = 2.3                                                # Values from the authors of the ACE
+ACE_K2 = 0.1                                                # Values from the authors of the ACE
+ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
+
 # Estimated node degree
 ACE_D = sum([ len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP ]) / len(NEIGHBORS_MAP)
 CI = ACE_MAX_WAIT_TIME / 1000 * ACE_EXPECTED_ROUNDS  # Estimated duration of the ACE
 
 ## Socket Parameters
 TCP_SERVER_PORT = 50005
-# TCP_CLIENT_PORT = 50006
 TCP_BUFFER_SIZE = 2048
 TCP_TIMEOUT = 10
 TCP_MAX_ATTEMPS = 3
@@ -70,64 +71,66 @@ class SimpleNode(object):
 
     def __init__(self, node_address):
         self.node_address = node_address
-        self.start_time = time.time()
+        self.start_time = time.time()       # the start time of the algorithm
         self.is_cluster_head = False
-        self.iteration_interval = 0
         self.loyal_followers = set()
-        self.cluster_membership = dict()
-        ## adittional flag to control PROMOTE process
-        self.migrating = False
+        self.cluster_membership = dict()    # a dict of clusters to follow
+        self.migrating = False              # adittional flag to control PROMOTE process
+        
         ## Initializing the listener
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
         ## Printing the host name arg
-        logging.debug("Starting ACE algorithm for CH. The node address is %s", self.node_address)
+        logging.info("---- Starting ACE algorithm for CH. The node address is %s", self.node_address)
+        logging.info("---- The iteration interval is %s ms.", ITERATION_INTERVAL)
         self.start_ace()
 
 
-    def add_membership(self, cluster_id, ch_address):
+
+    def join_cluster(self, cluster_id, ch_address=''):
         if cluster_id not in self.cluster_membership:
             self.cluster_membership[cluster_id] = ch_address
-            logging.debug("New membership. Cluster: %s, Cluster Head: %s", cluster_id, ch_address)
+            logging.debug("Node joined new cluster. Cluster=%s; Head=%s", cluster_id, ch_address)
         else:
-            logging.debug("Failed to add to Cluster %s. Cluster is already in the list.", cluster_id)
+            logging.debug("Cluster is already in the list. Cluster=%s.", cluster_id)
 
 
-    def remove_membership(self, cluster_id):
+    def left_cluster(self, cluster_id):
         if cluster_id in self.cluster_membership:
             del self.cluster_membership[cluster_id]
-            logging.debug("Membership removed. Cluster: %s.", cluster_id)
+            logging.debug("Node left a cluster. Cluster=%s.", cluster_id)
         else:
-            logging.debug('Failed to delete mem. %s is not in cluster head list.', ch_address)
+            logging.debug('Node isn\'t a member of the cluster. Cluster=%s.', cluster_id)
 
-
-    def find_cluster_head_by_id(self, search_id):
+    def get_cluster_head(self, search_id):
         address_found = ''
-        for ch_address, ch_id in self.cluster_head_list.iteritems():
-            if search_id == ch_id:
-                address_found = ch_address
+        for cluster_id, head_ip in self.cluster_membership.iteritems():
+            if search_id == cluster_id:
+                address_found = head_ip
         return address_found
 
 
-    def update_cluster_head_by_id(self, ch_id, new_address):
-        old_address = self.find_cluster_head_by_id(ch_id)
-        if old_address != '':
-            del self.cluster_head_list[old_address]
-            self.cluster_head_list[new_address] = ch_id
-            logging.debug("CH Updated. IP: %s, ID: %s --> IP: %s, ID: %s.",
-                          old_address, ch_id, new_address, ch_id)
+    def set_cluster_head(self, cluster_id, new_ch_address):
+        if cluster_id in self.cluster_membership:
+            old_address = self.get_cluster_head(cluster_id)
+            self.cluster_membership[cluster_id] = new_ch_address
+            logging.debug('Cluster head updated.Cluster=%s; Old head=%s; New Head=%s',
+                          cluster_id, old_address, new_ch_address)
         else:
-            logging.debug('Failed to update CH. ID %s is not in cluster head list.', ch_id)
+            logging.debug('Failed to update cluster head. Node isn\'t a member of Cluster=%s',
+                          cluster_id)
+
 
 
     def get_mystate(self):
         if self.is_cluster_head:
             return ACE_STATE_CLUSTER_HEAD
-        elif len(self.cluster_head_list) > 0:
+        elif len(self.cluster_membership) > 0:
             return ACE_STATE_CLUSTERED
         else:
             return ACE_STATE_UNCLUSTERED
+
 
 
     @classmethod
@@ -145,11 +148,8 @@ class SimpleNode(object):
 
 
     def start_ace(self):
-        logging.debug("Starting the ACE algorithm...")
-        self.iteration_interval = random.randrange(0, ACE_MAX_WAIT_TIME)
-        logging.debug("The iteration interval is %s ms.", self.iteration_interval)
         for i in range(10):
-            time.sleep(self.iteration_interval / 1000.0)
+            time.sleep(ITERATION_INTERVAL / 1000.0)
             logging.info("ACE Iteration %s", i)
             self.scale_one_iteraction()
 
