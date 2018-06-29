@@ -77,11 +77,13 @@ class SimpleNode(object):
         self.cluster_membership = dict()    # a dict of clusters to follow
         self.migrating = False              # flag to control PROMOTE process
         self.election_done = False          # flag to control whether the election is done
+        self.my_cluster_id = ''             # node cluster DI when the node is a CH
 
         ## Initializing the listener
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
+        
         ## Printing the host name arg
         logging.info("---- Starting ACE algorithm for CH. The node address is %s",
                      self.node_address)
@@ -154,13 +156,13 @@ class SimpleNode(object):
         iteration = 0
         while not self.election_done:
             time.sleep(ITERATION_INTERVAL / 1000.0)
-            logging.info("ACE Iteration %s", i)
+            logging.info("ACE Iteration %s", iteration)
             self.scale_one_iteraction()
             iteration = iteration + 1
 
 
     def scale_one_iteraction(self):
-        self.num_loyal_followers = self.count_loyal_followers()
+        num_loyal_followers = self.count_loyal_followers()
         my_time = time.time() - self.start_time
         if my_time > (3 * ACE_EXPECTED_DURATION_LENGHT):
             # Set the flag to stop the algorithm
@@ -184,18 +186,19 @@ class SimpleNode(object):
             # Print the node info for debug purpose
             self.print_node_info()
         elif self.get_mystate() == ACE_STATE_UNCLUSTERED and \
-                self.num_loyal_followers >= self.fmin(my_time, CI):
+                num_loyal_followers >= self.fmin(my_time, CI):
             self.my_cluster_id = self.generate_new_random_id()
             self.is_cluster_head = True
-            logging.info("Node %s will spawn a new CH with ID %s.", self.my_ip, self.my_cluster_id)
-            self.locally_broadcast(ACE_MSG_RECRUIT, self.my_ip, self.my_cluster_id)
+            logging.info("Node %s will spawn a new CH with ID %s.", 
+                         self.node_address, self.my_cluster_id)
+            self.locally_broadcast(ACE_MSG_RECRUIT, self.node_address, self.my_cluster_id)
         elif self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
             # The node prepares to migrate its cluster
-            logging.debug("The Node is preparing to MIGRATE its cluster.")
+            logging.info("The Node is preparing to MIGRATE its cluster.")
             best_leader = self.my_cluster_id
-            best_follower_count = self.num_loyal_followers
+            best_follower_count = num_loyal_followers
             # Polls all neighbors to find the best candidate
-            for neighbor_address in NEIGHBORS_MAP[self.my_ip]:
+            for neighbor_address in NEIGHBORS_MAP[self.node_address]:
                 follower_count, n = self.poll_for_num_loyal_followers(neighbor_address,
                                                                       self.my_cluster_id)
                 if follower_count > best_follower_count:
@@ -204,17 +207,18 @@ class SimpleNode(object):
                     best_leader_address = neighbor_address
             if best_leader != self.my_cluster_id:
                 logging.debug("Node %s will be a best leader candidate.", best_leader)
+                # promoto the best candidate found
                 self.send_promote_message(best_leader_address, ACE_MSG_PROMOTE, self.my_cluster_id)
+                # renounce the leader position (wait for the new leader RECRUIT MESSAGE )
                 self.is_cluster_head = False
-                old_cluster_id = self.my_cluster_id
-                self.my_cluster_id = best_leader
-                self.add_cluster_head(best_leader_address, best_leader)
+                # maybe it is not necessary
+                self.join_cluster(n, best_leader_address)
                 ## wait for the bestLeader to broadcast RECRUIT message
                 while self.migrating:
                     logging.debug("Waiting for node %s to send its RECRUIT message...",
                                   best_leader_address)
-                    # time.sleep(0.250)
-                self.locally_broadcast(ACE_MSG_ABDICATE, self.my_ip, old_cluster_id)
+                    time.sleep(0.250)
+                self.locally_broadcast(ACE_MSG_ABDICATE, self.node_address, self.my_cluster_id)
 
 
     def send_promote_done(self, target_address):
@@ -252,26 +256,50 @@ class SimpleNode(object):
         return neighbohr_loyal_followers, neighbohr_cluster_id
 
 
-    def count_loyal_followers(self, cluster_id=''):
-        # clear the list of loyal followers
-        self.loyal_followers_list.clear()
-        logging.debug("LOYALFOLLOWERS: Counting the number of loyal followers.")
-        for neighbor_address in NEIGHBORS_MAP[self.my_ip]:
+    def count_loyal_followers(self, poll_id=''):
+        # if poll_id is not empty the request came from a POLL_REQ
+        local_request = poll_id == ''
+        poller_followers = set()
+
+        if local_request:
+            self.loyal_followers.clear()
+            logging.debug("LOYALFOLLOWERS: Counting the number of loyal followers.")
+        else:
+            poller_followers.clear()
+            logging.debug("LOYALFOLLOWERS: Counting the number of loyal followers from a POLL message.")
+
+        # traverse the list of neighbors of the node
+        for neighbor_address in NEIGHBORS_MAP[self.node_address]:
             message_to_send = str(ACE_MSG_GETSTATUS)
             # The GETSTATUS will always return a 3 elements array
             data_array = self.send_message(neighbor_address, message_to_send)
-            logging.debug('LOYALFOLLOWERS: Received from host %s: %s', neighbor_address, data_array)
+            logging.debug('LOYALFOLLOWERS: Answer from host %s: %s', neighbor_address, data_array)
             neighbor_state = int(data_array[0])
-            neighbor_chs = int(data_array[1])
-            neighbor_ch_id = str(data_array[2])
-            if neighbor_state == ACE_STATE_UNCLUSTERED:
-                self.loyal_followers_list.add(neighbor_address)
-            if neighbor_state == ACE_STATE_CLUSTERED and neighbor_chs == 1:
-                if cluster_id != '':
-                    self.loyal_followers_list.add(neighbor_address)
-                elif cluster_id == neighbor_ch_id:
-                    self.loyal_followers_list.add(neighbor_address)
-        return len(self.loyal_followers_list)
+            neighbor_ch_count = int(data_array[1])
+            neighbor_cluster_id = str(data_array[2])
+            if local_request:
+                # processing code for a local request
+                if neighbor_state == ACE_STATE_UNCLUSTERED:
+                    # if the neighbor is Unclustered, it will be a loyal follower
+                    self.loyal_followers.add(neighbor_address)
+                if neighbor_state == ACE_STATE_CLUSTERED:
+                    # it is not a loyal follower
+                    # it should be confirmed in the ACE paper
+                    None
+            else:
+                if neighbor_state == ACE_STATE_UNCLUSTERED:
+                    # if the neighbor is Unclustered, it will be a loyal follower
+                    poller_followers.add(neighbor_address)
+                if neighbor_state == ACE_STATE_CLUSTERED:
+                    # it is only a loyal follower if the neighbor is already in the cluster
+                    if neighbor_ch_count == 1 and neighbor_cluster_id == poll_id:
+                        poller_followers.add(neighbor_address)
+        if local_request:
+            n_loyal_followers = len(self.loyal_followers)
+        else:
+            n_loyal_followers = len(poller_followers)
+        return n_loyal_followers
+
 
 
     def locally_broadcast(self, ace_msg, node_id, cluster_id):
@@ -446,11 +474,6 @@ def main(host_ip):
                         format=log_format,
                         datefmt='%H:%M:%S',)
     simple_node = SimpleNode(host_ip)
-
-
-def get_args(args, arg_key=''):
-    return args[args.index(arg_key) + 1]
-
 
 if __name__ == '__main__':
     HOST_IP = str(sys.argv[1])
