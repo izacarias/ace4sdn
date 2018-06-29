@@ -12,7 +12,7 @@
                 "isDefault": true
             },
             "args": [
-                "node.py", 
+                "node*.py", 
                 "/home/zaca/devel/chsdn/shared"
             ],
             "problemMatcher": [],
