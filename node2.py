@@ -75,15 +75,18 @@ class SimpleNode(object):
         self.is_cluster_head = False
         self.loyal_followers = set()
         self.cluster_membership = dict()    # a dict of clusters to follow
-        self.migrating = False              # adittional flag to control PROMOTE process
-        
+        self.migrating = False              # flag to control PROMOTE process
+        self.election_done = False          # flag to control whether the election is done
+
         ## Initializing the listener
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
         ## Printing the host name arg
-        logging.info("---- Starting ACE algorithm for CH. The node address is %s", self.node_address)
-        logging.info("---- The iteration interval is %s ms.", ITERATION_INTERVAL)
+        logging.info("---- Starting ACE algorithm for CH. The node address is %s",
+                     self.node_address)
+        logging.info("---- The iteration interval is %s ms.",
+                     ITERATION_INTERVAL)
         self.start_ace()
 
 
@@ -148,16 +151,20 @@ class SimpleNode(object):
 
 
     def start_ace(self):
-        for i in range(10):
+        iteration = 0
+        while not self.election_done:
             time.sleep(ITERATION_INTERVAL / 1000.0)
             logging.info("ACE Iteration %s", i)
             self.scale_one_iteraction()
+            iteration = iteration + 1
 
 
     def scale_one_iteraction(self):
         self.num_loyal_followers = self.count_loyal_followers()
         my_time = time.time() - self.start_time
         if my_time > (3 * ACE_EXPECTED_DURATION_LENGHT):
+            # Set the flag to stop the algorithm
+            self.election_done = True
             if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
                 print "+--------------------------------+"
                 print "|      Node elected as CH        |"
