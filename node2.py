@@ -10,16 +10,22 @@ import time
 import uuid
 
 NEIGHBORS_MAP = {
-    "10.0.0.1": ['10.0.0.2', '10.0.0.3', '10.0.0.4', '10.0.0.5', '10.0.0.6', '10.0.0.8'],
-    "10.0.0.2": ['10.0.0.3', '10.0.0.1', '10.0.0.9'],
+    "10.0.0.1": ['10.0.0.2', '10.0.0.3', '10.0.0.4', '10.0.0.5', '10.0.0.6', '10.0.0.8', '10.0.0.10'],
+    "10.0.0.2": ['10.0.0.3', '10.0.0.1', '10.0.0.10', '10.0.0.9'],
     "10.0.0.3": ['10.0.0.4', '10.0.0.1', '10.0.0.2'],
     "10.0.0.4": ['10.0.0.3', '10.0.0.5', '10.0.0.1'],
     "10.0.0.5": ['10.0.0.4', '10.0.0.6', '10.0.0.1'],
     "10.0.0.6": ['10.0.0.1', '10.0.0.5', '10.0.0.7', '10.0.0.8'],
     "10.0.0.7": ['10.0.0.8', '10.0.0.6'],
-    "10.0.0.8": ['10.0.0.1', '10.0.0.6', '10.0.0.7', '10.0.0.9'],
-    "10.0.0.9": ['10.0.0.2', '10.0.0.8']
+    "10.0.0.8": ['10.0.0.10', '10.0.0.1', '10.0.0.6', '10.0.0.7', '10.0.0.9'],
+    "10.0.0.9": ['10.0.0.2', '10.0.0.10', '10.0.0.8'],
+    "10.0.0.10": ['10.0.0.2', '10.0.0.1', '10.0.0.8', '10.0.0.9']
 }
+
+# Local name for LOG
+LOG_NAME = ''
+LOG_FILE = ''
+TOTAL_ITER = ''
 
 
 ## ACE Messages
@@ -162,6 +168,7 @@ class SimpleNode(object):
             logging.info("ACE Iteration %s", iteration)
             self.scale_one_iteraction()
             iteration = iteration + 1
+            TOTAL_ITER = iteration
 
 
     def scale_one_iteraction(self):
@@ -187,6 +194,11 @@ class SimpleNode(object):
                 print "|             as CH              |"
                 print "+--------------------------------+"
             # Print the node info for debug purpose
+            file_content = "NODE {0:s}; TOTAL_ITER {1:s}; TIME {2:s}"
+            file_content = file_content.format(self.node_address, str(TOTAL_ITER), str(my_time))
+            log_file = open(LOG_NAME, 'w')
+            log_file.write(file_content)
+            log_file.close()
             self.print_node_info()
         elif self.get_mystate() == ACE_STATE_UNCLUSTERED and \
                 num_loyal_followers >= self.fmin(my_time, CI):
@@ -492,5 +504,8 @@ def main(host_ip, log_level):
 
 if __name__ == '__main__':
     HOST_IP = str(sys.argv[1])
+    NODE_NUMBER = sys.argv[3].zfill(2)
+    REP_NUMBER = sys.argv[5].zfill(2)
+    LOG_NAME = "nodes{0:2s}_rep{1:2s}.log".format(NODE_NUMBER, REP_NUMBER)
     main(HOST_IP, logging.INFO)
     raw_input("Press Enter to continue...")
