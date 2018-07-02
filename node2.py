@@ -29,7 +29,7 @@ ACE_MSG_POLL = 2
 ACE_MSG_PROMOTE = 3
 ACE_MSG_ABDICATE = 4
 ACE_MSG_NA = 5
-ACE_MSG_PROMOTE_DONE = 7
+ACE_MSG_PROMOTE_DONE = 6
 # Description of Messages
 ACE_MSG_STR = ['ACE_MSG_GETSTATUS',
                'ACE_MSG_RECRUIT',
@@ -49,7 +49,7 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
                  'ACE_STATE_CLUSTER_HEAD']
 
 ## ACE Parameters
-ACE_MAX_WAIT_TIME = 3000                                    # milisseconds
+ACE_MAX_WAIT_TIME = 5000                                    # milisseconds
 ACE_EXPECTED_ROUNDS = 10                                    # number of rounds to run
 ACE_EXPECTED_DURATION_LENGHT = 4                            # seconds
 ACE_K1 = 2.3                                                # Values from the authors of the ACE
@@ -57,11 +57,11 @@ ACE_K2 = 0.1                                                # Values from the au
 ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
 
 # Estimated node degree
-ACE_D = sum([ len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP ]) / len(NEIGHBORS_MAP)
+ACE_D = sum([len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP]) / len(NEIGHBORS_MAP)
 CI = ACE_MAX_WAIT_TIME / 1000 * ACE_EXPECTED_ROUNDS  # Estimated duration of the ACE
 
 ## Socket Parameters
-TCP_SERVER_PORT = 50005
+TCP_SERVER_PORT = 40000
 TCP_BUFFER_SIZE = 2048
 TCP_TIMEOUT = 10
 TCP_MAX_ATTEMPS = 3
@@ -76,6 +76,7 @@ class SimpleNode(object):
         self.loyal_followers = set()
         self.cluster_membership = dict()    # a dict of clusters to follow
         self.migrating = False              # flag to control PROMOTE process
+        self.migrating_to = ''              # the address of the new leader node
         self.election_done = False          # flag to control whether the election is done
         self.my_cluster_id = ''             # node cluster DI when the node is a CH
 
@@ -83,7 +84,7 @@ class SimpleNode(object):
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
-        
+
         ## Printing the host name arg
         logging.info("---- Starting ACE algorithm for CH. The node address is %s",
                      self.node_address)
@@ -120,10 +121,10 @@ class SimpleNode(object):
 
     def set_cluster_head(self, cluster_id, new_ch_address):
         if cluster_id in self.cluster_membership:
-            old_address = self.get_cluster_head(cluster_id)
+            old_address = self.cluster_membership[cluster_id]
             self.cluster_membership[cluster_id] = new_ch_address
-            logging.debug('Cluster head updated.Cluster=%s; Old head=%s; New Head=%s',
-                          cluster_id, old_address, new_ch_address)
+            logging.info('CH updated! Cluster=%s; Old head=%s; New Head=%s',
+                         cluster_id, old_address, new_ch_address)
         else:
             logging.debug('Failed to update cluster head. Node isn\'t a member of Cluster=%s',
                           cluster_id)
@@ -141,8 +142,8 @@ class SimpleNode(object):
 
 
     @classmethod
-    def fmin(cls, my_time, cI):
-        result = (math.exp(-ACE_K1 * my_time/cI) - ACE_K2) * ACE_D
+    def fmin(cls, my_time, ace_ci):
+        result = (math.exp(-ACE_K1 * my_time/ace_ci) - ACE_K2) * ACE_D
         return result
 
 
@@ -202,12 +203,12 @@ class SimpleNode(object):
             # Polls all neighbors to find the best candidate
             for neighbor_address in NEIGHBORS_MAP[self.node_address]:
                 follower_count = self.poll_for_num_loyal_followers(neighbor_address,
-                                                                      self.my_cluster_id)
+                                                                   self.my_cluster_id)
                 if follower_count > best_follower_count:
                     best_leader = neighbor_address
                     best_follower_count = follower_count
             if best_leader != self.node_address:
-                logging.debug("Node %s will be a best leader candidate.", best_leader)
+                logging.info("Node %s will be a best leader candidate.", best_leader)
                 # promote the best candidate found (and set migrating flag to True)
                 self.send_promote_message(best_leader, ACE_MSG_PROMOTE, self.my_cluster_id)
                 ## wait for the bestLeader to broadcast RECRUIT message
@@ -216,6 +217,9 @@ class SimpleNode(object):
                                   best_leader)
                     time.sleep(0.250)
                 self.locally_broadcast(ACE_MSG_ABDICATE, self.node_address, self.my_cluster_id)
+                self.my_cluster_id = ''
+            else:
+                logging.info("I'm the best leader. I decided not to migrate the CH.")
 
 
     def send_promote_done(self, target_address):
@@ -231,18 +235,21 @@ class SimpleNode(object):
     def send_promote_message(self, target_address, ace_msg, cluster_id):
         logging.debug("Sending PROMOTE message to node %s", target_address)
         promote_messsage = ';'.join([str(ace_msg), cluster_id])
+        self.migrating = True
+        self.migrating_to = target_address
         try:
             self.send_message_noans(target_address, promote_messsage)
             logging.debug('Waiting for the node %s to broadcast RECRUIT message.', target_address)
-            self.migrating = True
         except socket.error, exc:
             logging.error("Could not send MIGRATE to node %s. Error: %s", target_address, exc)
             self.migrating = False
+            self.migrating_to = ''
         return
 
 
     def poll_for_num_loyal_followers(self, neighbor_address, cluster_id):
-        logging.debug("POLLING the number of loyal followers of node %s", neighbor_address)
+        logging.debug("POLLING the number of loyal followers of node %s. Cluster=%s",
+                      neighbor_address, cluster_id)
         poll_messsage = ';'.join([str(ACE_MSG_POLL), cluster_id])
         data_arr = self.send_message(neighbor_address, poll_messsage)
         logging.debug("POLLING: Received message was: %s", data_arr)
@@ -263,7 +270,7 @@ class SimpleNode(object):
         else:
             poller_followers.clear()
             logging.debug("LOYALFOLLOWERS: Counting the number of loyal followers \
-                           from a POLL message.")
+                           from a POLL message. Cluster=%s", poll_id)
 
         # traverse the list of neighbors of the node
         for neighbor_address in NEIGHBORS_MAP[self.node_address]:
@@ -289,8 +296,11 @@ class SimpleNode(object):
                         poller_followers.add(neighbor_address)
         if local_request:
             n_loyal_followers = len(self.loyal_followers)
+            logging.debug("I have %s loyal followres.", n_loyal_followers)
         else:
             n_loyal_followers = len(poller_followers)
+            logging.debug("I have %s nighbors followres of CH=%s.",
+                          n_loyal_followers, poll_id)
         return n_loyal_followers
 
 
@@ -298,19 +308,20 @@ class SimpleNode(object):
     def locally_broadcast(self, ace_msg, node_address, cluster_id):
         for neighbor_address in NEIGHBORS_MAP[self.node_address]:
             logging.debug("Sending %s message to node: %s",
-                          ACE_STATE_STR[ace_msg], neighbor_address)
-            recruit_message = ';'.join([str(ace_msg), node_address, cluster_id])
-            self.send_message_noans(neighbor_address, recruit_message)
+                          ACE_MSG_STR[ace_msg], neighbor_address)
+            message = ';'.join([str(ace_msg), node_address, cluster_id])
+            self.send_message_noans(neighbor_address, message)
 
 
     def send_message(self, dst_address, message_str):
+        dst_port = TCP_SERVER_PORT + int(dst_address.split('.')[3])
         logging.debug("send_message: node %s message %s", dst_address, message_str)
         response_arr = []
         for attemp in range(TCP_MAX_ATTEMPS):
             send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             send_socket.settimeout(TCP_TIMEOUT)
             try:
-                send_socket.connect((dst_address, TCP_SERVER_PORT))
+                send_socket.connect((dst_address, dst_port))
                 send_socket.send(message_str)
                 response_str = send_socket.recv(TCP_BUFFER_SIZE)
                 response_arr = response_str.split(';')
@@ -329,20 +340,21 @@ class SimpleNode(object):
 
 
     def send_message_noans(self, dst_address, message_str):
+        dst_port = TCP_SERVER_PORT + int(dst_address.split('.')[3])
         logging.debug("send_message_noans: node %s message %s", dst_address, message_str)
         for attemp in range(TCP_MAX_ATTEMPS):
             send_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             send_socket.settimeout(TCP_TIMEOUT)
             try:
-                send_socket.connect((dst_address, TCP_SERVER_PORT))
+                send_socket.connect((dst_address, dst_port))
                 send_socket.send(message_str)
                 send_socket.close()
             except socket.timeout:
                 logging.error("send_message: Socket timeout error. Attemp %s", attemp)
                 time.sleep(0.5)
             except socket.error, exc:
-                logging.critical("send_message_noans: error sending message to node %s. Exception: %s",
-                                 dst_address, exc)
+                logging.critical("send_message_noans: error sending message to node %s. \
+                                 Exception: %s", dst_address, exc)
                 raise
             else:
                 break
@@ -350,11 +362,12 @@ class SimpleNode(object):
 
 
     def handle_client_connection(self):
+        local_port = TCP_SERVER_PORT + int(self.node_address.split('.')[3])
         logging.debug("CONNHANDLER: Handling client connections...")
         logging.debug("CONNHANDLER: Binding on IP: %s Port: %s.",
-                      self.node_address, TCP_SERVER_PORT)
+                      self.node_address, local_port)
         r_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        r_socket.bind((self.node_address, TCP_SERVER_PORT))
+        r_socket.bind((self.node_address, local_port))
         r_socket.listen(10)
         while True:
             (client_sock, client_address) = r_socket.accept()
@@ -369,7 +382,7 @@ class SimpleNode(object):
                 # The response should include
                 # staus, number of clusters, cluster id (when following one cluster only)
                 r_state = str(self.get_mystate())
-                r_number_of_chs = len(self.cluster_membership)
+                r_number_of_chs = str(len(self.cluster_membership))
                 r_cluster_id = ''
                 if len(self.cluster_membership) == 1:
                     r_cluster_id = self.cluster_membership.keys()[0]
@@ -382,6 +395,13 @@ class SimpleNode(object):
             if ace_msg == ACE_MSG_RECRUIT:
                 new_ch_address = request.split(';')[1]
                 new_cluster_id = request.split(';')[2]
+                # Disable the migrating flag soon as the node receive a RECRUIT message
+                # from the node that it is migrating to
+                if self.migrating and self.migrating_to == new_ch_address:
+                    self.migrating = False
+                    self.migrating_to = ''
+                    self.is_cluster_head = False
+                # Normal processing of a RECRUIT MSG
                 if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
                     logging.info("CONNHANDLER: I am a CH. I will not follow %s.",
                                  new_ch_address)
@@ -394,6 +414,7 @@ class SimpleNode(object):
             if ace_msg == ACE_MSG_POLL:
                 ch_to_poll = request.split(';')[1]
                 num_loyal_followers = self.count_loyal_followers(ch_to_poll)
+                # num_loyal_followers = str(len(self.loyal_followers))
                 # Not used anymore
                 r_num_loyal_followers = str(num_loyal_followers)
                 response_str = ';'.join([r_num_loyal_followers])
@@ -403,13 +424,17 @@ class SimpleNode(object):
             # ACE_MSG_PROMOTE
             if ace_msg == ACE_MSG_PROMOTE:
                 cluster_id = request.split(';')[1]
+                self.is_cluster_head = True
+                self.my_cluster_id = cluster_id
                 self.locally_broadcast(ACE_MSG_RECRUIT, self.node_address, cluster_id)
                 self.send_promote_done(client_address[0])
 
             # ACE_MSG_PROMOTE_DONE
             if ace_msg == ACE_MSG_PROMOTE_DONE:
                 self.migrating = False
+                self.migrating_to = ''
 
+            # ACE_MSG_ABDICATE
             if ace_msg == ACE_MSG_ABDICATE:
                 ch_address = request.split(';')[1]
                 cluster_id = request.split(';')[2]
@@ -435,10 +460,10 @@ class SimpleNode(object):
 
     def print_chs(self):
         print "+--------------------------------+"
-        print "|       Cluster Heads table      |"
+        print "|       Clusters table           |"
         print "+--------------------------------+"
-        for ch_addr, ch_id in self.cluster_head_list.iteritems():
-            print "| %-15s -> %11s |" % (ch_addr, ch_id)
+        for cluster_id, ch_address in self.cluster_membership.iteritems():
+            print "| %-15s -> %11s |" % (cluster_id, ch_address)
         print "+--------------------------------+"
         print ""
 
@@ -447,20 +472,19 @@ class SimpleNode(object):
         print "+--------------------------------+"
         print "|     Loyal Followers table      |"
         print "+--------------------------------+"
-        for followers in self.loyal_followers_list:
-            print "| %-30s |" % followers
+        for follower in self.loyal_followers:
+            print "| %-30s |" % follower
         print "+--------------------------------+"
         print ""
 
 
-def main(host_ip):
+def main(host_ip, log_level):
     # check the parameter format. It should be an Ip ADDRESS
     if host_ip not in NEIGHBORS_MAP:
         raise Exception("Wrong host IP address.")
     ## Setting up the log system
     # log_format = "%(asctime)s: %(funcName)20s() - %(lineno)s: %(message)s"
     log_format = "%(asctime)s,%(msecs)03d:L%(lineno)4s: %(message)s"
-    log_level = logging.INFO
     logging.basicConfig(level=log_level,
                         format=log_format,
                         datefmt='%H:%M:%S',)
@@ -468,5 +492,5 @@ def main(host_ip):
 
 if __name__ == '__main__':
     HOST_IP = str(sys.argv[1])
-    main(HOST_IP)
+    main(HOST_IP, logging.INFO)
     raw_input("Press Enter to continue...")
