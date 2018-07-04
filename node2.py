@@ -25,7 +25,6 @@ NEIGHBORS_MAP = {
 # Local name for LOG
 LOG_NAME = ''
 LOG_FILE = ''
-TOTAL_ITER = ''
 
 
 ## ACE Messages
@@ -34,16 +33,18 @@ ACE_MSG_RECRUIT = 1
 ACE_MSG_POLL = 2
 ACE_MSG_PROMOTE = 3
 ACE_MSG_ABDICATE = 4
-ACE_MSG_NA = 5
-ACE_MSG_PROMOTE_DONE = 6
+ACE_MSG_PROMOTE_DONE = 5
+ACE_MSG_POLL_OK = 6
+ACE_MSG_POLL_NA = 7
 # Description of Messages
 ACE_MSG_STR = ['ACE_MSG_GETSTATUS',
                'ACE_MSG_RECRUIT',
                'ACE_MSG_POLL',
                'ACE_MSG_PROMOTE',
                'ACE_MSG_ABDICATE',
-               'ACE_MSG_NA',
-               'ACE_MSG_PROMOTE_DONE']
+               'ACE_MSG_PROMOTE_DONE',
+               'ACE_MSG_POLL_OK',
+               'ACE_MSG_POLL_NA']
 
 ## ACE States
 ACE_STATE_UNCLUSTERED = 0
@@ -55,16 +56,16 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
                  'ACE_STATE_CLUSTER_HEAD']
 
 ## ACE Parameters
-ACE_MAX_WAIT_TIME = 5000                                    # milisseconds
+ACE_MAX_WAIT_TIME = 2000.0                                  # milisseconds
 ACE_EXPECTED_ROUNDS = 10                                    # number of rounds to run
-ACE_EXPECTED_DURATION_LENGHT = 4                            # seconds
-ACE_K1 = 2.3                                                # Values from the authors of the ACE
-ACE_K2 = 0.1                                                # Values from the authors of the ACE
+ACE_EXPECTED_DURATION_LENGHT = 1.5                          # seconds
 ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
 
 # Estimated node degree
+ACE_K1 = 2.3                                                # Values from the authors of the ACE
+ACE_K2 = 0.08                                               # Values from the authors of the ACE
 ACE_D = sum([len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP]) / len(NEIGHBORS_MAP)
-CI = ACE_MAX_WAIT_TIME / 1000 * ACE_EXPECTED_ROUNDS  # Estimated duration of the ACE
+ACE_CI = (ACE_MAX_WAIT_TIME/2) / 1000 * ACE_EXPECTED_ROUNDS # Estimated duration of the ACE
 
 ## Socket Parameters
 TCP_SERVER_PORT = 40000
@@ -83,8 +84,9 @@ class SimpleNode(object):
         self.cluster_membership = dict()    # a dict of clusters to follow
         self.migrating = False              # flag to control PROMOTE process
         self.migrating_to = ''              # the address of the new leader node
-        self.election_done = False          # flag to control whether the election is done
+        self.ace_done = False          # flag to control whether the election is done
         self.my_cluster_id = ''             # node cluster DI when the node is a CH
+        self.total_iters = 0                # stores the total number of iteractions
 
         ## Initializing the listener
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
@@ -140,10 +142,11 @@ class SimpleNode(object):
     def get_mystate(self):
         if self.is_cluster_head:
             return ACE_STATE_CLUSTER_HEAD
-        elif len(self.cluster_membership) > 0:
-            return ACE_STATE_CLUSTERED
         else:
-            return ACE_STATE_UNCLUSTERED
+            if len(self.cluster_membership) > 0:
+                return ACE_STATE_CLUSTERED
+            else:
+                return ACE_STATE_UNCLUSTERED
 
 
 
@@ -162,13 +165,12 @@ class SimpleNode(object):
 
 
     def start_ace(self):
-        iteration = 0
-        while not self.election_done:
+        self.total_iters = 0
+        while not self.ace_done:
             time.sleep(ITERATION_INTERVAL / 1000.0)
-            logging.info("ACE Iteration %s", iteration)
+            logging.info("ACE Iteration %s", self.total_iters)
             self.scale_one_iteraction()
-            iteration = iteration + 1
-            TOTAL_ITER = iteration
+            self.total_iters = self.total_iters + 1
 
 
     def scale_one_iteraction(self):
@@ -176,62 +178,75 @@ class SimpleNode(object):
         my_time = time.time() - self.start_time
         if my_time > (3 * ACE_EXPECTED_DURATION_LENGHT):
             # Set the flag to stop the algorithm
-            self.election_done = True
+            if not self.migrating:
+                self.ace_done = True
             if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
-                print "+--------------------------------+"
-                print "|      Node elected as CH        |"
-                print "+--------------------------------+"
+                print "+---------------------------------+"
+                print "|       Node elected as CH        |"
+                print "+---------------------------------+"
             elif self.get_mystate() == ACE_STATE_CLUSTERED:
                 # pick one as my cluster-head
-                print "+--------------------------------+"
-                print "|   Pick one as my cluster-head  |"
-                print "+--------------------------------+"
+                print "+---------------------------------+"
+                print "|   Pick one as my cluster-head   |"
+                print "+---------------------------------+"
             elif self.get_mystate() == ACE_STATE_UNCLUSTERED:
                 # pick a random clustered node to as proxy
                 # after it terminates wait for it to terminate
-                print "+--------------------------------+"
-                print "|    Node will declare himself   |"
-                print "|             as CH              |"
-                print "+--------------------------------+"
+                print "+---------------------------------+"
+                print "| Node will declare himself as CH |"
+                print "+---------------------------------+"
             # Print the node info for debug purpose
-            file_content = "NODE {0:s}; TOTAL_ITER {1:s}; TIME {2:s}"
-            file_content = file_content.format(self.node_address, str(TOTAL_ITER), str(my_time))
-            log_file = open(LOG_NAME, 'w')
+            file_content = "NODE {0:s}; STATE: {1:s}; TOTAL_ITER {2:s}; TIME {3:s};\n"
+            file_content = file_content.format(
+                self.node_address,
+                str(self.get_mystate()),
+                str(self.total_iters),
+                str(my_time))
+            log_file = open(LOG_NAME, 'a')
             log_file.write(file_content)
             log_file.close()
             self.print_node_info()
-        elif self.get_mystate() == ACE_STATE_UNCLUSTERED and \
-                num_loyal_followers >= self.fmin(my_time, CI):
-            self.my_cluster_id = self.generate_new_random_id()
-            self.is_cluster_head = True
-            logging.info("Node %s will spawn a new CH with ID %s.",
-                         self.node_address, self.my_cluster_id)
-            self.locally_broadcast(ACE_MSG_RECRUIT, self.node_address, self.my_cluster_id)
-        elif self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
-            # The node prepares to migrate its cluster
-            logging.info("The Node is preparing to MIGRATE its cluster.")
-            best_leader = self.node_address
-            best_follower_count = num_loyal_followers
-            # Polls all neighbors to find the best candidate
-            for neighbor_address in NEIGHBORS_MAP[self.node_address]:
-                follower_count = self.poll_for_num_loyal_followers(neighbor_address,
-                                                                   self.my_cluster_id)
-                if follower_count > best_follower_count:
-                    best_leader = neighbor_address
-                    best_follower_count = follower_count
-            if best_leader != self.node_address:
-                logging.info("Node %s will be a best leader candidate.", best_leader)
-                # promote the best candidate found (and set migrating flag to True)
-                self.send_promote_message(best_leader, ACE_MSG_PROMOTE, self.my_cluster_id)
-                ## wait for the bestLeader to broadcast RECRUIT message
-                while self.migrating:
-                    logging.debug("Waiting for node %s to send its RECRUIT message...",
-                                  best_leader)
-                    time.sleep(0.250)
-                self.locally_broadcast(ACE_MSG_ABDICATE, self.node_address, self.my_cluster_id)
-                self.my_cluster_id = ''
-            else:
-                logging.info("I'm the best leader. I decided not to migrate the CH.")
+        else:
+            # State: UNCLUSTERED
+            if self.get_mystate() == ACE_STATE_UNCLUSTERED and \
+                    num_loyal_followers >= self.fmin(my_time, ACE_CI):
+                self.my_cluster_id = self.generate_new_random_id()
+                logging.info("Node %s will spawn a new CH with ID %s.",
+                             self.node_address, self.my_cluster_id)
+                self.is_cluster_head = True
+                self.locally_broadcast(ACE_MSG_RECRUIT, self.node_address, self.my_cluster_id)
+
+            # State: CLUSTER_HEAD
+            if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
+                # The node prepares to migrate its cluster
+                logging.info("The Node is preparing to MIGRATE its cluster.")
+                best_leader = self.node_address
+                best_follower_count = num_loyal_followers
+                # Polls all neighbors to find the best candidate
+                for neighbor_address in NEIGHBORS_MAP[self.node_address]:
+                    follower_count = self.poll_for_num_loyal_followers(neighbor_address,
+                                                                       self.my_cluster_id)
+                    # the node answer the POLL message with ACE_MSG_POLL_NA
+                    if follower_count == -1:
+                        continue
+                    # normal answer
+                    if follower_count > best_follower_count:
+                        best_leader = neighbor_address
+                        best_follower_count = follower_count
+                if best_leader != self.node_address:
+                    logging.info("Node %s will be a best leader candidate.", best_leader)
+                    # promote the best candidate found (and set migrating flag to True)
+                    self.send_promote_message(best_leader, ACE_MSG_PROMOTE, self.my_cluster_id)
+                    ## wait for the bestLeader to broadcast RECRUIT message
+                    while self.migrating:
+                        logging.debug("Waiting for node %s to send its RECRUIT message...",
+                                      best_leader)
+                        time.sleep(0.100)
+                    self.locally_broadcast(ACE_MSG_ABDICATE, self.node_address, self.my_cluster_id)
+                    logging.info("I will ABDICATE as leader of Cluster=%s", self.my_cluster_id)
+                    self.my_cluster_id = ''
+                else:
+                    logging.info("I'm the best leader. I decided not to migrate the CH.")
 
 
     def send_promote_done(self, target_address):
@@ -265,17 +280,20 @@ class SimpleNode(object):
         poll_messsage = ';'.join([str(ACE_MSG_POLL), cluster_id])
         data_arr = self.send_message(neighbor_address, poll_messsage)
         logging.debug("POLLING: Received message was: %s", data_arr)
-        neighbohr_loyal_followers = int(data_arr[0])
-        logging.debug('POLL: Host %s has %s loyal follwoers with id %s', neighbor_address,
-                      neighbohr_loyal_followers, cluster_id)
-        return neighbohr_loyal_followers
+        response_status = int(data_arr[0])
+        neighbohr_loyal_followers = int(data_arr[1])
+        if response_status == ACE_MSG_POLL_OK:
+            logging.debug('POLL: Host %s has %s loyal follwoers with id %s',
+                          neighbor_address, neighbohr_loyal_followers, cluster_id)
+            return neighbohr_loyal_followers
+        else:
+            return -1
 
 
     def count_loyal_followers(self, poll_id=''):
         # if poll_id is not empty the request came from a POLL_REQ
         local_request = poll_id == ''
         poller_followers = set()
-
         if local_request:
             self.loyal_followers.clear()
             logging.debug("LOYALFOLLOWERS: Counting the number of loyal followers.")
@@ -283,7 +301,6 @@ class SimpleNode(object):
             poller_followers.clear()
             logging.debug("LOYALFOLLOWERS: Counting the number of loyal followers \
                            from a POLL message. Cluster=%s", poll_id)
-
         # traverse the list of neighbors of the node
         for neighbor_address in NEIGHBORS_MAP[self.node_address]:
             message_to_send = str(ACE_MSG_GETSTATUS)
@@ -424,14 +441,22 @@ class SimpleNode(object):
 
             # ACE_MSG_POLL
             if ace_msg == ACE_MSG_POLL:
-                ch_to_poll = request.split(';')[1]
-                num_loyal_followers = self.count_loyal_followers(ch_to_poll)
-                # num_loyal_followers = str(len(self.loyal_followers))
-                # Not used anymore
-                r_num_loyal_followers = str(num_loyal_followers)
-                response_str = ';'.join([r_num_loyal_followers])
+                response_str = ''
+                if not self.ace_done:
+                    ch_to_poll = request.split(';')[1]
+                    num_loyal_followers = self.count_loyal_followers(ch_to_poll)
+                    # num_loyal_followers = str(len(self.loyal_followers))
+                    # Not used anymore
+                    r_status = str(ACE_MSG_POLL_OK)
+                    r_num_loyal_followers = str(num_loyal_followers)
+                    response_str = ';'.join([r_status, r_num_loyal_followers])
+                    logging.debug("CONNHANDLER: POLL Done! The answer was sent.")
+                else:
+                    r_status = str(ACE_MSG_POLL_NA)
+                    r_num_loyal_followers = str(0)
+                    response_str = ';'.join([r_status, r_num_loyal_followers])
+                    logging.debug("CONNHANDLER: POLL NA!")
                 client_sock.send(response_str)
-                logging.debug("CONNHANDLER: POLL Done! The answer was sent.")
 
             # ACE_MSG_PROMOTE
             if ace_msg == ACE_MSG_PROMOTE:
