@@ -57,15 +57,15 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
 
 ## ACE Parameters
 ACE_MAX_WAIT_TIME = 2000.0                                  # milisseconds
-ACE_EXPECTED_ROUNDS = 10                                    # number of rounds to run
-ACE_EXPECTED_DURATION_LENGHT = 1.5                          # seconds
+ACE_EXPECTED_ROUNDS = 4                                     # number of rounds to run
+ACE_EXPECTED_ITERATION_LENGHT = 1.5                         # seconds
 ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
 
 # Estimated node degree
 ACE_K1 = 2.3                                                # Values from the authors of the ACE
 ACE_K2 = 0.08                                               # Values from the authors of the ACE
 ACE_D = sum([len(NEIGHBORS_MAP[node]) for node in NEIGHBORS_MAP]) / len(NEIGHBORS_MAP)
-ACE_CI = (ACE_MAX_WAIT_TIME/2) / 1000 * ACE_EXPECTED_ROUNDS # Estimated duration of the ACE
+ACE_CI = (ACE_MAX_WAIT_TIME/1000) * ACE_EXPECTED_ROUNDS # Estimated duration of the ACE
 
 ## Socket Parameters
 TCP_SERVER_PORT = 40000
@@ -176,7 +176,7 @@ class SimpleNode(object):
     def scale_one_iteraction(self):
         num_loyal_followers = self.count_loyal_followers()
         my_time = time.time() - self.start_time
-        if my_time > (3 * ACE_EXPECTED_DURATION_LENGHT):
+        if my_time > (3 * ACE_EXPECTED_ITERATION_LENGHT):
             # Set the flag to stop the algorithm
             if not self.migrating:
                 self.ace_done = True
