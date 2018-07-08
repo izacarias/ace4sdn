@@ -315,6 +315,10 @@ class SimpleNode(object):
                 if neighbor_state == ACE_STATE_UNCLUSTERED:
                     # if the neighbor is Unclustered, it will be a loyal follower
                     self.loyal_followers.add(neighbor_address)
+                if neighbor_state == ACE_STATE_CLUSTERED:
+                    # if the neighbor is Clustered, it follow only one node
+                    if neighbor_ch_count == 1 and neighbor_cluster_id == self.my_cluster_id:
+                        self.loyal_followers.add(neighbor_address)
             else:
                 if neighbor_state == ACE_STATE_UNCLUSTERED:
                     # if the neighbor is Unclustered, it will be a loyal follower
