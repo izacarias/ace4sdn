@@ -72,6 +72,7 @@ ACE_CI = (ACE_MAX_WAIT_TIME/1000) * ACE_EXPECTED_ROUNDS # Estimated duration of 
 ## Socket Parameters
 TCP_SERVER_PORT = 40000
 TCP_BUFFER_SIZE = 2048
+UDP_SERVER_PORT = 39999
 TCP_TIMEOUT = 10
 TCP_MAX_ATTEMPS = 3
 
@@ -94,6 +95,12 @@ class SimpleNode(object):
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
+
+        ## Initializing the leader announcement listener
+        self.handle_leader_announcement_t = threading.Thread(target=self.handle_leader_announcement,
+                                                             args=())
+        self.handle_leader_announcement_t.daemon = True
+        self.handle_leader_announcement_t.start()
 
         ## Printing the host name arg
         logging.info("---- Starting ACE algorithm for CH. The node address is %s",
@@ -352,7 +359,6 @@ class SimpleNode(object):
 
 
     def send_leader_announcement(self, node_address, cluster_id, num_loyal_followers):
-        dst_port = TCP_SERVER_PORT
         message = ';'.join([str(ACE_MSG_LEADER_ANNOUNCEMENT),
                             str(node_address),
                             str(cluster_id),
@@ -360,9 +366,10 @@ class SimpleNode(object):
         bcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         bcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         bcast_socket.settimeout(0.2)
-        bcast_socket.sendto(message, ('<broadcast>', dst_port))
+        bcast_socket.bind((self.node_address, UDP_SERVER_PORT - 1))
+        bcast_socket.sendto(message, ('<broadcast>', UDP_SERVER_PORT))
         bcast_socket.close()
-        logging.debug("Leader announcement sent!")
+        logging.info("Leader announcement sent!")
 
 
     def send_message(self, dst_address, message_str):
@@ -411,6 +418,17 @@ class SimpleNode(object):
             else:
                 break
         return
+
+
+    def handle_leader_announcement(self):
+        bcast_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        bcast_client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bcast_client.bind(('', UDP_SERVER_PORT))
+        logging.info("BCAST: Binding port for leader announcement")
+        while True:
+            data, addr = bcast_client.recvfrom(2048)
+            logging.info("BCAST: Recv leader announcement.")
+            print "Leader announcement: %s" % data
 
 
     def handle_client_connection(self):
