@@ -36,6 +36,7 @@ ACE_MSG_ABDICATE = 4
 ACE_MSG_PROMOTE_DONE = 5
 ACE_MSG_POLL_OK = 6
 ACE_MSG_POLL_NA = 7
+ACE_MSG_LEADER_ANNOUNCEMENT = 8
 # Description of Messages
 ACE_MSG_STR = ['ACE_MSG_GETSTATUS',
                'ACE_MSG_RECRUIT',
@@ -44,7 +45,8 @@ ACE_MSG_STR = ['ACE_MSG_GETSTATUS',
                'ACE_MSG_ABDICATE',
                'ACE_MSG_PROMOTE_DONE',
                'ACE_MSG_POLL_OK',
-               'ACE_MSG_POLL_NA']
+               'ACE_MSG_POLL_NA',
+               'ACE_MSG_LEADER_ANNOUNCEMENT']
 
 ## ACE States
 ACE_STATE_UNCLUSTERED = 0
@@ -181,6 +183,10 @@ class SimpleNode(object):
             if not self.migrating:
                 self.ace_done = True
             if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
+                # Announce itself as a leader
+                self.send_leader_announcement(self.node_address,
+                                              self.my_cluster_id,
+                                              self.get_loyal_followers())
                 print "+---------------------------------+"
                 print "|       Node elected as CH        |"
                 print "+---------------------------------+"
@@ -337,13 +343,26 @@ class SimpleNode(object):
         return n_loyal_followers
 
 
-
     def locally_broadcast(self, ace_msg, node_address, cluster_id):
         for neighbor_address in NEIGHBORS_MAP[self.node_address]:
             logging.debug("Sending %s message to node: %s",
                           ACE_MSG_STR[ace_msg], neighbor_address)
             message = ';'.join([str(ace_msg), node_address, cluster_id])
             self.send_message_noans(neighbor_address, message)
+
+
+    def send_leader_announcement(self, node_address, cluster_id, num_loyal_followers):
+        dst_port = TCP_SERVER_PORT
+        message = ';'.join([str(ACE_MSG_LEADER_ANNOUNCEMENT),
+                            str(node_address),
+                            str(cluster_id),
+                            str(num_loyal_followers)])
+        bcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        bcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bcast_socket.settimeout(0.2)
+        bcast_socket.sendto(message, ('<broadcast>', dst_port))
+        bcast_socket.close()
+        logging.debug("Leader announcement sent!")
 
 
     def send_message(self, dst_address, message_str):
@@ -404,7 +423,6 @@ class SimpleNode(object):
         r_socket.listen(10)
         while True:
             (client_sock, client_address) = r_socket.accept()
-            # logging.debug("CONNHANDLER: Connection accepted from : %s", client_address)
             request = client_sock.recv(TCP_BUFFER_SIZE)
             ace_msg = int(request.split(';')[0])
             logging.debug("CONNHANDLER: Receiving message: %s from host %s",
