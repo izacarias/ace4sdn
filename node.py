@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 
-from hostmap10 import NEIGHBORS_MAP
+from hostmap15 import NEIGHBORS_MAP
 
 # Local name for LOG
 LOG_NAME = ''
@@ -70,7 +70,6 @@ class SimpleNode(object):
 
     def __init__(self, node_address):
         self.node_address = node_address
-        self.start_time = time.time()       # the start time of the algorithm
         self.is_cluster_head = False
         self.loyal_followers = set()
         self.cluster_membership = dict()    # a dict of clusters to follow
@@ -85,6 +84,8 @@ class SimpleNode(object):
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
 
+        time.sleep(3)
+        self.start_time = time.time()       # the start time of the algorithm
         ## Printing the host name arg
         logging.info("---- Starting ACE algorithm for CH. The node address is %s",
                      self.node_address)
@@ -184,7 +185,7 @@ class SimpleNode(object):
                 print "| Node will declare himself as CH |"
                 print "+---------------------------------+"
             # Print the node info for debug purpose
-            file_content = "NODE {0:s}; STATE: {1:s}; TOTAL_ITER {2:s}; TIME {3:s};\n"
+            file_content = "NODE; {0:s}; STATE;{1:s}; TOTAL_ITER; {2:s}; TIME; {3:s};\n"
             file_content = file_content.format(
                 self.node_address,
                 str(self.get_mystate()),
@@ -522,4 +523,5 @@ if __name__ == '__main__':
     NODE_NUMBER = sys.argv[3].zfill(2)
     LOG_NAME = "nodes{0:2s}.log".format(NODE_NUMBER)
     main(HOST_IP, logging.INFO)
-    raw_input("Press Enter to continue...")
+    # raw_input("Press Enter to continue...")
+    time.sleep(15)
