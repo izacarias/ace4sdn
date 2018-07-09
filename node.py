@@ -5,6 +5,7 @@ import math
 import random
 import socket
 import sys
+import thread
 import threading
 import time
 import uuid
@@ -381,20 +382,32 @@ class SimpleNode(object):
                 break
         return
 
-
+    
     def handle_client_connection(self):
         local_port = TCP_SERVER_PORT + int(self.node_address.split('.')[3])
         logging.debug("CONNHANDLER: Handling client connections...")
         logging.debug("CONNHANDLER: Binding on IP: %s Port: %s.",
                       self.node_address, local_port)
-        r_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        r_socket.bind((self.node_address, local_port))
-        r_socket.listen(10)
+        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_socket.bind((self.node_address, local_port))
+        tcp_socket.listen(1)
         while True:
-            (client_sock, client_address) = r_socket.accept()
+            (conn, client) = tcp_socket.accept()
+            thread.start_new_thread(self.client_connection, tuple([conn, client]))
+        tcp_socket.close()
+
+
+    def client_connection(self, client_sock, client_address):
+        logging.debug("CLIENT_CONN: Connected by: %s:%s",
+                      client_address[0], client_address[1])
+        while True:
             request = client_sock.recv(TCP_BUFFER_SIZE)
+            # No request sent by the client
+            if not request:
+                break
+            # Normal processing of the request
             ace_msg = int(request.split(';')[0])
-            logging.debug("CONNHANDLER: Receiving message: %s from host %s",
+            logging.debug("CLIENT_CONN: Receiving message: %s from host %s",
                           ACE_MSG_STR[ace_msg], client_address[0])
 
             # ACE_MSG_GETSTATUS
@@ -407,8 +420,8 @@ class SimpleNode(object):
                 if len(self.cluster_membership) == 1:
                     r_cluster_id = self.cluster_membership.keys()[0]
                 response_str = ';'.join([r_state, r_number_of_chs, r_cluster_id])
-                logging.debug("CONNHANDLER: Sending message %s to node %s", response_str,
-                              client_address[0])
+                logging.debug("CLIENT_CONN: Sending message %s to node %s", response_str,
+                                client_address[0])
                 client_sock.send(response_str)
 
             # ACE_MSG_RECRUIT
@@ -423,12 +436,12 @@ class SimpleNode(object):
                     self.is_cluster_head = False
                 # Normal processing of a RECRUIT MSG
                 if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
-                    logging.info("CONNHANDLER: I am a CH. I will not follow %s.",
-                                 new_ch_address)
+                    logging.info("CLIENT_CONN: I am a CH. I will not follow %s.",
+                                    new_ch_address)
                 else:
                     self.join_cluster(new_cluster_id, new_ch_address)
-                    logging.info("CONNHANDLER: OK! I am a follower of the CH %s",
-                                 new_ch_address)
+                    logging.info("CLIENT_CONN: OK! I am a follower of the CH %s",
+                                    new_ch_address)
 
             # ACE_MSG_POLL
             if ace_msg == ACE_MSG_POLL:
@@ -441,12 +454,12 @@ class SimpleNode(object):
                     r_status = str(ACE_MSG_POLL_OK)
                     r_num_loyal_followers = str(num_loyal_followers)
                     response_str = ';'.join([r_status, r_num_loyal_followers])
-                    logging.debug("CONNHANDLER: POLL Done! The answer was sent.")
+                    logging.debug("CLIENT_CONN: POLL Done! The answer was sent.")
                 else:
                     r_status = str(ACE_MSG_POLL_NA)
                     r_num_loyal_followers = str(0)
                     response_str = ';'.join([r_status, r_num_loyal_followers])
-                    logging.debug("CONNHANDLER: POLL NA!")
+                    logging.debug("CLIENT_CONN: POLL NA!")
                 client_sock.send(response_str)
 
             # ACE_MSG_PROMOTE
@@ -467,7 +480,8 @@ class SimpleNode(object):
                 ch_address = request.split(';')[1]
                 cluster_id = request.split(';')[2]
                 self.left_cluster(cluster_id, ch_address)
-            client_sock.close()
+        logging.debug("CLIENT_CONN: Closing client connection: %s:%s",
+                      client_address[0], client_address[1])
 
 
     def __str__(self):
@@ -524,4 +538,4 @@ if __name__ == '__main__':
     LOG_NAME = "nodes{0:2s}.log".format(NODE_NUMBER)
     main(HOST_IP, logging.INFO)
     # raw_input("Press Enter to continue...")
-    time.sleep(15)
+    time.sleep(10)
