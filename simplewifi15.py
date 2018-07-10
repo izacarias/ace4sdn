@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
-'This example creates a simple network topology with 1 AP and 2 stations'
-
+import os
 import sys
 import time
 from mininet.node import Controller
@@ -12,7 +11,7 @@ from mininet.wifi.cli import CLI_wifi
 from mininet.wifi.net import Mininet_wifi
 
 
-def topology():
+def topology(nodes, rep):
     "Create a network."
     net = Mininet_wifi(controller=Controller, accessPoint=OVSKernelAP)
 
@@ -33,9 +32,10 @@ def topology():
     sta14 = net.addStation('sta14')
     sta15 = net.addStation('sta15')
 
+    h1 = net.addHost('h1')
+    h2 = net.addHost('h2')
+
     ap1 = net.addAccessPoint('ap1', ssid="simplewifi", mode="g", channel="5")
-    ap2 = net.addAccessPoint('ap2', ssid="simplewifi", mode="g", channel="5")
-    ap3 = net.addAccessPoint('ap3', ssid="simplewifi", mode="g", channel="5")
 
     c0 = net.addController('c0', controller=Controller, ip='127.0.0.1',
                            port=6633)
@@ -52,30 +52,33 @@ def topology():
     net.addLink(sta3, ap1)
     net.addLink(sta4, ap1)
     net.addLink(sta5, ap1)
-    net.addLink(sta6, ap2)
-    net.addLink(sta7, ap2)
-    net.addLink(sta8, ap2)
-    net.addLink(sta9, ap2)
-    net.addLink(sta10, ap2)
-    net.addLink(sta11, ap3)
-    net.addLink(sta12, ap3)
-    net.addLink(sta13, ap3)
-    net.addLink(sta14, ap3)
-    net.addLink(sta15, ap3)
+    net.addLink(sta6, ap1)
+    net.addLink(sta7, ap1)
+    net.addLink(sta8, ap1)
+    net.addLink(sta9, ap1)
+    net.addLink(sta10, ap1)
+    net.addLink(sta11, ap1)
+    net.addLink(sta12, ap1)
+    net.addLink(sta13, ap1)
+    net.addLink(sta14, ap1)
+    net.addLink(sta15, ap1)
+
+    net.addLink(h1, ap1)
+    net.addLink(h2, ap1)
 
     info("*** Starting network\n")
     net.build()
     c0.start()
     ap1.start([c0])
-    ap2.start([c0])
-    ap3.start([c0])
 
     info("*** Ping All\n")
     net.pingAll()
 
-    time.sleep(2)
+    h1.cmd('sudo iperf -s -u -i 1 -t 30 > teste_server &')
+    h2.sendCmd('iperf -u -c ' + h1.IP() + ' -b 10M -i 1 -t 30 > teste_client')
+    # removing the SDN Controller
+    ap1.cmd("ovs-vsctl --db=unix:/var/run/openvswitch/db.sock del-controller ap1")
 
-    # print "Sta1 IP: %s" % sta1.params['ip'][0].split('/')[0]
     makeTerm( sta1, cmd="python /media/sf_shared/node.py 10.0.0.1 -nodes 15 -rep 1;sleep 2" )
     makeTerm( sta2, cmd="python /media/sf_shared/node.py 10.0.0.2 -nodes 15 -rep 1;sleep 2" )
     makeTerm( sta3, cmd="python /media/sf_shared/node.py 10.0.0.3 -nodes 15 -rep 1;sleep 2" )
@@ -92,14 +95,20 @@ def topology():
     makeTerm( sta14, cmd="python /media/sf_shared/node.py 10.0.0.14 -nodes 15 -rep 1;sleep 2" )
     makeTerm( sta15, cmd="python /media/sf_shared/node.py 10.0.0.15 -nodes 15 -rep 1;sleep 2" )
 
-    info("*** Running CLI\n")
+    info("*** Waiting for iperf to terminate.\n")
+    results = {}
+    results[h2] = h2.waitOutput()
+    h1.cmd('kill $!')
+
+    # info("*** Running CLI\n")
     # CLI_wifi(net)
-    time.sleep(17)
 
     info("*** Stopping network\n")
     net.stop()
 
 
 if __name__ == '__main__':
+    p_nodes = str(sys.argv[1].zfill(2))
+    p_rep = str(sys.argv[3].zfill(2))
     setLogLevel('info')
-    topology()
+    topology(p_nodes, p_rep)

@@ -2,6 +2,7 @@
 
 import logging
 import math
+import os
 import random
 import socket
 import sys
@@ -10,7 +11,7 @@ import threading
 import time
 import uuid
 
-from hostmap15 import NEIGHBORS_MAP
+from hostmap05 import NEIGHBORS_MAP
 
 # Local name for LOG
 LOG_NAME = ''
@@ -50,7 +51,7 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
 ## ACE Parameters
 ACE_MAX_WAIT_TIME = 2000.0                                  # milisseconds
 ACE_EXPECTED_ROUNDS = 4                                     # number of rounds to run
-ACE_EXPECTED_ITERATION_LENGHT = 1.5                         # seconds
+ACE_EXPECTED_ITERATION_LENGHT = 10                         # seconds
 ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
 
 # Estimated node degree
@@ -65,6 +66,14 @@ TCP_BUFFER_SIZE = 2048
 UDP_SERVER_PORT = 39999
 TCP_TIMEOUT = 10
 TCP_MAX_ATTEMPS = 3
+
+
+def of_set_controller(bridge_name='ap1', controller_ip='127.0.0.1', controller_port='6653'):
+    set_command = 'ovs-vsctl --db=unix:/var/run/openvswitch/db.sock set-controller '
+    set_command = set_command + bridge_name + ' '
+    set_command = set_command + ' tcp:' + controller_ip + ':' + controller_port
+    os.system(set_command)
+
 
 class SimpleNode(object):
 
@@ -85,7 +94,6 @@ class SimpleNode(object):
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
 
-        time.sleep(3)
         self.start_time = time.time()       # the start time of the algorithm
         ## Printing the host name arg
         logging.info("---- Starting ACE algorithm for CH. The node address is %s",
@@ -174,6 +182,7 @@ class SimpleNode(object):
                 print "+---------------------------------+"
                 print "|       Node elected as CH        |"
                 print "+---------------------------------+"
+                of_set_controller('ap1', '127.0.0.1', '6653')
             elif self.get_mystate() == ACE_STATE_CLUSTERED:
                 # pick one as my cluster-head
                 print "+---------------------------------+"
