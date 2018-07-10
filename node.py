@@ -328,21 +328,21 @@ class SimpleNode(object):
                         poller_followers.add(neighbor_address)
         if local_request:
             n_loyal_followers = len(self.loyal_followers)
-NODE_NUMBERug("I have %s loyal followres.", n_loyal_followers)
-NODE_NUMBER
-NODE_NUMBERlowers = len(poller_followers)
-NODE_NUMBERug("I have %s nighbors followres of CH=%s.",
-NODE_NUMBER   n_loyal_followers, poll_id)
-NODE_NUMBERfollowers
-NODE_NUMBER
-NODE_NUMBER
-NODE_NUMBERst(self, ace_msg, node_address, cluster_id):
-NODE_NUMBERdress in NEIGHBORS_MAP[self.node_address]:
-NODE_NUMBERug("Sending %s message to node: %s",
-NODE_NUMBER   ACE_MSG_STR[ace_msg], neighbor_address)
-NODE_NUMBER;'.join([str(ace_msg), node_address, cluster_id])
-NODE_NUMBERessage_noans(neighbor_address, message)
-NODE_NUMBER
+            logging.debug("I have %s loyal followres.", n_loyal_followers)
+        else:
+            n_loyal_followers = len(poller_followers)
+            logging.debug("I have %s nighbors followres of CH=%s.",
+                          n_loyal_followers, poll_id)
+        return n_loyal_followers
+
+
+    def locally_broadcast(self, ace_msg, node_address, cluster_id):
+        for neighbor_address in NEIGHBORS_MAP[self.node_address]:
+            logging.debug("Sending %s message to node: %s",
+                          ACE_MSG_STR[ace_msg], neighbor_address)
+            message = ';'.join([str(ace_msg), node_address, cluster_id])
+            self.send_message_noans(neighbor_address, message)
+            
 
     def send_message(self, dst_address, message_str):
         dst_port = TCP_SERVER_PORT + int(dst_address.split('.')[3])
