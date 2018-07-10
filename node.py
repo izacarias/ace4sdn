@@ -49,9 +49,9 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
                  'ACE_STATE_CLUSTER_HEAD']
 
 ## ACE Parameters
-ACE_MAX_WAIT_TIME = 1000.0                                  # milisseconds
+ACE_MAX_WAIT_TIME = 2000.0                                  # milisseconds
 ACE_EXPECTED_ROUNDS = 4                                     # number of rounds to run
-ACE_EXPECTED_ITERATION_LENGHT = 10                         # seconds
+ACE_EXPECTED_ITERATION_LENGHT = 1.5                         # seconds
 ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
 
 # Estimated node degree
