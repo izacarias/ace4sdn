@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
-'This example creates a simple network topology with 1 AP and 2 stations'
-
+import os
 import sys
 import time
 from mininet.node import Controller
@@ -12,7 +11,7 @@ from mininet.wifi.cli import CLI_wifi
 from mininet.wifi.net import Mininet_wifi
 
 
-def topology():
+def topology(nodes, rep):
     "Create a network."
     net = Mininet_wifi(controller=Controller, accessPoint=OVSKernelAP)
 
@@ -27,6 +26,9 @@ def topology():
     sta8 = net.addStation('sta8')
     sta9 = net.addStation('sta9')
     sta10 = net.addStation('sta10')
+
+    h1 = net.addHost('h1')
+    h2 = net.addHost('h2')
 
     ap1 = net.addAccessPoint('ap1', ssid="simplewifi", mode="g", channel="5")
     c0 = net.addController('c0', controller=Controller, ip='127.0.0.1',
@@ -47,6 +49,9 @@ def topology():
     net.addLink(sta9, ap1)
     net.addLink(sta10, ap1)
 
+    net.addLink(h1, ap1)
+    net.addLink(h2, ap1)
+
     info("*** Starting network\n")
     net.build()
     c0.start()
@@ -55,26 +60,36 @@ def topology():
     info("*** Ping All\n")
     net.pingAll()
 
-    # print "Sta1 IP: %s" % sta1.params['ip'][0].split('/')[0]
-    makeTerm( sta1, cmd="python /media/sf_shared/node.py 10.0.0.1 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta2, cmd="python /media/sf_shared/node.py 10.0.0.2 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta3, cmd="python /media/sf_shared/node.py 10.0.0.3 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta4, cmd="python /media/sf_shared/node.py 10.0.0.4 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta5, cmd="python /media/sf_shared/node.py 10.0.0.5 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta6, cmd="python /media/sf_shared/node.py 10.0.0.6 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta7, cmd="python /media/sf_shared/node.py 10.0.0.7 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta8, cmd="python /media/sf_shared/node.py 10.0.0.8 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta9, cmd="python /media/sf_shared/node.py 10.0.0.9 -nodes 10 -rep 1;sleep 5" )
-    makeTerm( sta10, cmd="python /media/sf_shared/node.py 10.0.0.10 -nodes 10 -rep 1;sleep 5" )
+    h1.cmd('sudo iperf -s -u -i 1 -t 30 > teste_server &')
+    h2.sendCmd('iperf -u -c ' + h1.IP() + ' -b 10M -i 1 -t 30 > teste_client')
+    # removing the SDN Controller
+    ap1.cmd("ovs-vsctl --db=unix:/var/run/openvswitch/db.sock del-controller ap1")
 
-    info("*** Running CLI\n")
+    makeTerm( sta1, cmd="python /media/sf_shared/node.py 10.0.0.1 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta2, cmd="python /media/sf_shared/node.py 10.0.0.2 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta3, cmd="python /media/sf_shared/node.py 10.0.0.3 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta4, cmd="python /media/sf_shared/node.py 10.0.0.4 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta5, cmd="python /media/sf_shared/node.py 10.0.0.5 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta6, cmd="python /media/sf_shared/node.py 10.0.0.6 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta7, cmd="python /media/sf_shared/node.py 10.0.0.7 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta8, cmd="python /media/sf_shared/node.py 10.0.0.8 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta9, cmd="python /media/sf_shared/node.py 10.0.0.9 -nodes 10 -rep 1;sleep 2" )
+    makeTerm( sta10, cmd="python /media/sf_shared/node.py 10.0.0.10 -nodes 10 -rep 1;sleep 2" )
+
+    info("*** Waiting for iperf to terminate.\n")
+    results = {}
+    results[h2] = h2.waitOutput()
+    h1.cmd('kill $!')
+
+    # info("*** Running CLI\n")
     # CLI_wifi(net)
-    time.sleep(15)
 
     info("*** Stopping network\n")
     net.stop()
 
 
 if __name__ == '__main__':
+    p_nodes = str(sys.argv[1].zfill(2))
+    p_rep = str(sys.argv[3].zfill(2))
     setLogLevel('info')
-    topology()
+    topology(p_nodes, p_rep)
