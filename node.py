@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from hostmap05 import NEIGHBORS_MAP
+from hostmap15 import NEIGHBORS_MAP
 
 # Local name for LOG
 LOG_NAME = ''
@@ -49,7 +49,7 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
                  'ACE_STATE_CLUSTER_HEAD']
 
 ## ACE Parameters
-ACE_MAX_WAIT_TIME = 2000.0                                  # milisseconds
+ACE_MAX_WAIT_TIME = 2300.0                                  # milisseconds
 ACE_EXPECTED_ROUNDS = 4                                     # number of rounds to run
 ACE_EXPECTED_ITERATION_LENGHT = 1.5                         # seconds
 ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
@@ -75,24 +75,36 @@ def of_set_controller(bridge_name='ap1', controller_ip='127.0.0.1', controller_p
     os.system(set_command)
 
 
+def of_del_controller(bridge_name='ap1'):
+    set_command = 'ovs-vsctl --db=unix:/var/run/openvswitch/db.sock del-controller '
+    set_command = set_command + bridge_name
+    os.system(set_command)
+
+
 class SimpleNode(object):
 
 
     def __init__(self, node_address):
-        self.node_address = node_address
-        self.is_cluster_head = False
-        self.loyal_followers = set()
+        self.node_address = node_address    # the node address (IP address in the simulation)
+        self.is_cluster_head = False        # true when the node is a Cluster Head
+        self.loyal_followers = set()        # set of loyal followers of the node
         self.cluster_membership = dict()    # a dict of clusters to follow
         self.migrating = False              # flag to control PROMOTE process
         self.migrating_to = ''              # the address of the new leader node
         self.ace_done = False               # flag to control whether the election is done
         self.my_cluster_id = ''             # node cluster DI when the node is a CH
         self.total_iters = 0                # stores the total number of iteractions
+        self.current_controller = ()        # current SND Controller. Tuple: (<ip>, followers)
 
         ## Initializing the listener
         self.handle_connections_t = threading.Thread(target=self.handle_client_connection, args=())
         self.handle_connections_t.daemon = True
         self.handle_connections_t.start()
+
+        ## Initializing the listener for leader annoucement (UDP)
+        self.handle_leader_announcement_t = threading.Thread(target=self.handle_leader_announcement, args=())
+        self.handle_leader_announcement_t.daemon = True
+        self.handle_leader_announcement_t.start()
 
         self.start_time = time.time()       # the start time of the algorithm
         ## Printing the host name arg
@@ -182,7 +194,9 @@ class SimpleNode(object):
                 print "+---------------------------------+"
                 print "|       Node elected as CH        |"
                 print "+---------------------------------+"
-                of_set_controller('ap1', '127.0.0.1', '6653')
+                self.send_leader_announcement(self.node_address,
+                                              self.my_cluster_id,
+                                              self.get_loyal_followers())
             elif self.get_mystate() == ACE_STATE_CLUSTERED:
                 # pick one as my cluster-head
                 print "+---------------------------------+"
@@ -195,7 +209,7 @@ class SimpleNode(object):
                 print "| Node will declare himself as CH |"
                 print "+---------------------------------+"
             # Print the node info for debug purpose
-            file_content = "NODE; {0:s}; STATE;{1:s}; TOTAL_ITER; {2:s}; TIME; {3:s};\n"
+            file_content = "NODE;{0:s};STATE;{1:s};TOTAL_ITER;{2:s};TIME;{3:s}\n"
             file_content = file_content.format(
                 self.node_address,
                 str(self.get_mystate()),
@@ -342,7 +356,7 @@ class SimpleNode(object):
                           ACE_MSG_STR[ace_msg], neighbor_address)
             message = ';'.join([str(ace_msg), node_address, cluster_id])
             self.send_message_noans(neighbor_address, message)
-            
+
 
     def send_message(self, dst_address, message_str):
         dst_port = TCP_SERVER_PORT + int(dst_address.split('.')[3])
@@ -391,7 +405,7 @@ class SimpleNode(object):
                 break
         return
 
-    
+
     def handle_client_connection(self):
         local_port = TCP_SERVER_PORT + int(self.node_address.split('.')[3])
         logging.debug("CONNHANDLER: Handling client connections...")
@@ -403,7 +417,7 @@ class SimpleNode(object):
         while True:
             (conn, client) = tcp_socket.accept()
             thread.start_new_thread(self.client_connection, tuple([conn, client]))
-        tcp_socket.close()
+        # tcp_socket.close()
 
 
     def client_connection(self, client_sock, client_address):
@@ -412,8 +426,9 @@ class SimpleNode(object):
         while True:
             request = client_sock.recv(TCP_BUFFER_SIZE)
             # No request sent by the client
-            if not request:
+            if not request: 
                 break
+
             # Normal processing of the request
             ace_msg = int(request.split(';')[0])
             logging.debug("CLIENT_CONN: Receiving message: %s from host %s",
@@ -430,7 +445,7 @@ class SimpleNode(object):
                     r_cluster_id = self.cluster_membership.keys()[0]
                 response_str = ';'.join([r_state, r_number_of_chs, r_cluster_id])
                 logging.debug("CLIENT_CONN: Sending message %s to node %s", response_str,
-                                client_address[0])
+                              client_address[0])
                 client_sock.send(response_str)
 
             # ACE_MSG_RECRUIT
@@ -446,11 +461,11 @@ class SimpleNode(object):
                 # Normal processing of a RECRUIT MSG
                 if self.get_mystate() == ACE_STATE_CLUSTER_HEAD:
                     logging.info("CLIENT_CONN: I am a CH. I will not follow %s.",
-                                    new_ch_address)
+                                 new_ch_address)
                 else:
                     self.join_cluster(new_cluster_id, new_ch_address)
                     logging.info("CLIENT_CONN: OK! I am a follower of the CH %s",
-                                    new_ch_address)
+                                 new_ch_address)
 
             # ACE_MSG_POLL
             if ace_msg == ACE_MSG_POLL:
@@ -489,8 +504,77 @@ class SimpleNode(object):
                 ch_address = request.split(';')[1]
                 cluster_id = request.split(';')[2]
                 self.left_cluster(cluster_id, ch_address)
+        
         logging.debug("CLIENT_CONN: Closing client connection: %s:%s",
                       client_address[0], client_address[1])
+        client_sock.close()
+        thread.exit()
+
+
+    def send_leader_announcement(self, node_address, cluster_id, num_loyal_followers):
+        self.leader_update(node_address, int(num_loyal_followers))
+        message = ';'.join([str(ACE_MSG_LEADER_ANNOUNCEMENT),
+                            str(node_address),
+                            str(cluster_id),
+                            str(num_loyal_followers)])
+        bcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        bcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bcast_socket.settimeout(0.5)
+        bcast_socket.bind((self.node_address, UDP_SERVER_PORT - 1))
+        bcast_socket.sendto(message, ('<broadcast>', UDP_SERVER_PORT))
+        bcast_socket.close()
+        logging.info("Leader announcement sent!")
+
+
+    def handle_leader_announcement(self):
+        bcast_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        bcast_client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bcast_client.bind(('', UDP_SERVER_PORT))
+        logging.info("BCAST: Binding port for leader announcement")
+        while True:
+            (data, addr) = bcast_client.recvfrom(2048)
+            logging.info("BCAST: Recv leader announcement.")
+            thread.start_new_thread(self.leader_announcement, tuple([data, addr]))
+        bcast_client.close()
+
+
+    def leader_announcement(self, data, client_address):
+        logging.debug("LEADER_ANN: Sending leader announcement.")
+        ace_msg = int(data.split(';')[0])
+        if ace_msg == ACE_MSG_LEADER_ANNOUNCEMENT:
+            announced_leader_addr = data.split(';')[1]
+            announced_leader_flw = int(data.split(';')[3])
+            self.leader_update(announced_leader_addr, announced_leader_flw)
+
+
+    def leader_update(self, address, followers):
+        logging.debug("LEADER_UPD: Setting to: %s", address)
+        new_addr = address
+        new_flw = followers
+        update = False
+
+        if len(self.current_controller) == 0:
+            self.current_controller = (new_addr, new_flw)
+            of_set_controller('ap1', '127.0.0.1', '6653')
+            logging.debug("")
+        else:
+            curr_addr, curr_flw = self.current_controller
+            # new controller has a greater number of followers
+            if new_flw > curr_flw:
+                update = True
+            # same number of followers, use the last octet of the address
+            if new_flw == curr_flw:
+                curr_last_octect = int(curr_addr.split('.')[3])
+                new_last_octect = int(new_addr.split('.')[3])
+                if new_last_octect > curr_last_octect:
+                    update = True
+            if update:
+                self.current_controller = (new_addr, new_flw)
+                # just for simulation
+                if self.node_address == '10.0.0.1':
+                    logging.debug("LEADER_UPD: Configuring OVS to: %s", address)
+                    of_del_controller('ap1')
+                    of_set_controller('ap1', '127.0.0.1', '6653')
 
 
     def __str__(self):
@@ -546,5 +630,4 @@ if __name__ == '__main__':
     NODE_NUMBER = sys.argv[3].zfill(2)
     LOG_NAME = "nodes{0:2s}.log".format(NODE_NUMBER)
     main(HOST_IP, logging.INFO)
-    # raw_input("Press Enter to continue...")
     time.sleep(10)
