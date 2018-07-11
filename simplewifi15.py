@@ -43,9 +43,6 @@ def topology(nodes, rep):
     info("*** Configuring wifi nodes\n")
     net.configureWifiNodes()
 
-    net.addLink(ap1, ap2)
-    net.addLink(ap2, ap3)
-
     info("*** Associating Stations\n")
     net.addLink(sta1, ap1)
     net.addLink(sta2, ap1)
@@ -74,8 +71,8 @@ def topology(nodes, rep):
     info("*** Ping All\n")
     net.pingAll()
 
-    h1.cmd('sudo iperf -s -u -i 1 -t 30 > teste_server &')
-    h2.sendCmd('iperf -u -c ' + h1.IP() + ' -b 10M -i 1 -t 30 > teste_client')
+    h1.cmd('sudo iperf -s -u -i 1 -t 30 > iperf_s_n' + nodes + '_r' + rep + ' &')
+    h2.sendCmd('iperf -u -c ' + h1.IP() + ' -b 10M -i 1 -t 30 > iperf_c_n'+ nodes +'_r' + rep)
     # removing the SDN Controller
     ap1.cmd("ovs-vsctl --db=unix:/var/run/openvswitch/db.sock del-controller ap1")
 
