@@ -52,7 +52,7 @@ ACE_STATE_STR = ['ACE_STATE_UNCLUSTERED',
 ACE_MAX_WAIT_TIME = 2500.0                                  # milisseconds
 ACE_EXPECTED_ROUNDS = 4                                     # number of rounds to run
 ACE_EXPECTED_ITERATION_LENGHT = 1.5                         # seconds
-ITERATION_INTERVAL = random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
+ITERATION_INTERVAL = 200 + random.randrange(0, ACE_MAX_WAIT_TIME) # Interval between iterations
 
 # Estimated node degree
 ACE_K1 = 2.3                                                # Values from the authors of the ACE
@@ -112,7 +112,7 @@ class SimpleNode(object):
                      self.node_address)
         logging.info("---- The iteration interval is %s ms.",
                      ITERATION_INTERVAL)
-        time.sleep(0.200)
+        time.sleep(0.400)
         self.start_ace()
 
 
